@@ -22,7 +22,6 @@ using namespace std;
 *
 */
 #define SMALLSH_RL_BUFSIZE 1024
-#define EXIT_FAILURE 1
 #define SMALLSH_TOK_BUFSIZE 64
 #define SMALLSH_TOK_DELIM " \t\r\n\a"
 /*
@@ -30,15 +29,58 @@ using namespace std;
 * Раздел объявления прототипов
 *
 */
-// command_loop - основной цикл исполнения команд. Запускатеся после
-// загрузки конфигурационных файлов при старте SmallSH
-int command_loop();
+// command_loop - основной цикл исполнения команд
+int    command_loop();
 // Функция, считывающая введенную строку
-char* command_read_line();
+char*  command_read_line();
 // Разбиение строки на массив введенных значений
 char** command_split_line(char* line);
 // Выполнение команды с её параметрами
-int command_execute(char** args);
+int    command_execute(char** args);
+// Выполнение внешних команд
+int    command_launch(char **args);
+/*
+ *
+ * Объявление функций для встроенных команд оболочки:
+ *
+*/
+// Команда change directory - смена каталога
+int smallsh_cd(char **args);
+// Команда pwd - полный путь к текущему расположению
+int smallsh_pwd(char **args);
+// Команда kill(PID) - принудительное завершение процесса
+int smallsh_kill(char **args);
+// Команда declare - список переменных
+int smallsh_declare(char **args);
+// Список команд
+int smallsh_help(char **args);
+// Выход из интерпретатора
+int smallsh_exit(char **args);
+/*
+ *
+ * Список встроенных команд, за которыми следуют соответствующие функции
+ *
+ */
+char *builtin_str[] = {
+        "cd",
+        "help",
+        "exit",
+        "pwd",
+        "kill",
+        "declare"
+};
+int (*builtin_func[]) (char **) = {
+        &smallsh_cd,
+        &smallsh_help,
+        &smallsh_exit,
+        &smallsh_pwd,
+        &smallsh_kill,
+        &smallsh_declare,
+};
+// Список встроенных команд
+int smallsh_num_builtins() {
+        return sizeof(builtin_str) / sizeof(char *);
+}
 /*
 *
 * Точка входа для консольного приложения
@@ -75,7 +117,6 @@ int command_loop() {
         args = command_split_line(line);
         // выполняем команду с параметрами
         status = command_execute(args);
-        printf("%d\n", status);
         free(line);
         free(args);
     } while (status);
@@ -92,7 +133,7 @@ char* command_read_line(){
     int position = 0;
     char *buffer = (char*)malloc(sizeof(char) * bufsize);
     int c;
-    // Если не удалось выделить необхлдимое количество памяти под буфер
+    // Если не удалось выделить необходимое количество памяти под буфер
     if (!buffer) {
         fprintf(stderr, "SmallSH: memory allocation error. Exit...\n");
         exit(EXIT_FAILURE);
@@ -124,7 +165,6 @@ char* command_read_line(){
             }
         }
     }
-    return status;
 }
 /*
 *
@@ -160,34 +200,102 @@ char** command_split_line(char* line){
     tokens[position] = NULL;
     return tokens;
 }
-
+/*
+ *
+ * Выполнение команд, введенных пользователем. Сначала производит поиск встроенных команд,
+ * а если команды нет в списке встроенных - выполняет соответствующую программу
+ *
+ */
 int command_execute(char** args) {
-    return true;
+    int i;
+
+    if (args[0] == NULL) {
+        // Была введена пустая команда.
+        return 1;
+    }
+
+    for (i = 0; i < smallsh_num_builtins(); i++) {
+        if (strcmp(args[0], builtin_str[i]) == 0) {
+            return (*builtin_func[i])(args);
+        }
+    }
+    return command_launch(args);
 }
 
-int lsh_launch(char **args)
+int command_launch(char **args)
 {
     pid_t pid, wpid;
     int status;
-
+    // форк текущего процесса
     pid = fork();
     if (pid == 0) {
-        // Дочерний процесс
+        // Выполняем дочерний процесс, передавая ему команду с параметрами
         if (execvp(args[0], args) == -1) {
-            perror("lsh");
+            // Выводим информацию об ошибке
+            perror("SmallSH");
         }
+        // Завершаем дочерний процесс
         exit(EXIT_FAILURE);
     }
     else if (pid < 0) {
         // Ошибка при форкинге
-        perror("lsh");
+        perror("SmallSH");
     }
     else {
         // Родительский процесс
         do {
+            // ожидаем возврата ответа от дочернего процесса
             wpid = waitpid(pid, &status, WUNTRACED);
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
-
     return 1;
+}
+/*
+ *
+ * Реализации встроенных в интепретатор функций
+ *
+*/
+int smallsh_cd(char **args)
+{
+    if (args[1] == NULL) {
+        fprintf(stderr, "SmallSH: ожидается аргумент для \"cd\"\n");
+    } else {
+        if (chdir(args[1]) != 0) {
+            perror("SmallSH");
+        }
+    }
+    return 1;
+}
+
+int smallsh_pwd(char **args)
+{
+    return 1;
+}
+int smallsh_kill(char **args)
+{
+    return 1;
+}
+
+int smallsh_declare(char **args)
+{
+    return 1;
+}
+int smallsh_help(char **args)
+{
+    int i;
+    printf("SmallSH by Oleg Yariga\n");
+    printf("Type command and press return\n");
+    printf("Builtin commands list:\n");
+
+    for (i = 0; i < smallsh_num_builtins(); i++) {
+        printf("  %s\n", builtin_str[i]);
+    }
+
+    printf("Use man to get information about other commands\n");
+    return 1;
+}
+
+int smallsh_exit(char **args)
+{
+    return 0;
 }
