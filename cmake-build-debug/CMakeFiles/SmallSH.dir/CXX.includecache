@@ -1,0 +1,20 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/user/Рабочий стол/SmallSH/main.cpp
+stdio.h
+-
+stdlib.h
+-
+cstring
+-
+sys/wait.h
+-
+unistd.h
+-
+
