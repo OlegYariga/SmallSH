@@ -278,6 +278,7 @@ int smallsh_kill(char **args)
 
 int smallsh_declare(char **args)
 {
+    
     return 1;
 }
 int smallsh_help(char **args)
