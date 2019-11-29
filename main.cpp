@@ -13,6 +13,12 @@
 #include <cstring>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <map>
+#include <string>
+#include <list>
+#include <algorithm>
 
 using namespace std;
 /*
@@ -24,6 +30,8 @@ using namespace std;
 #define SMALLSH_RL_BUFSIZE 1024
 #define SMALLSH_TOK_BUFSIZE 64
 #define SMALLSH_TOK_DELIM " \t\r\n\a"
+#define MAXDIR 1024
+#define NAME variables
 /*
 *
 * Раздел объявления прототипов
@@ -77,6 +85,10 @@ int (*builtin_func[]) (char **) = {
         &smallsh_kill,
         &smallsh_declare,
 };
+// хранит команды для declare
+std::multimap<string, string> Map;
+std::list<string> Key;
+std::list<string> Val;
 // Список встроенных команд
 int smallsh_num_builtins() {
         return sizeof(builtin_str) / sizeof(char *);
@@ -89,15 +101,11 @@ int smallsh_num_builtins() {
 int main(int argc, char **argv)
 {
     // Загрузка файлов конфигурации при их наличии.
-
     // Запуск цикла команд.
     command_loop();
-
     // Выключение / очистка памяти.
-
     return 0;
 }
-
 /*
 *
 *Функция, производящая обработку команд
@@ -259,6 +267,7 @@ int smallsh_cd(char **args)
 {
     if (args[1] == NULL) {
         fprintf(stderr, "SmallSH: ожидается аргумент для \"cd\"\n");
+        return 1;
     } else {
         if (chdir(args[1]) != 0) {
             perror("SmallSH");
@@ -269,16 +278,31 @@ int smallsh_cd(char **args)
 
 int smallsh_pwd(char **args)
 {
+    char dir[MAXDIR];
+    getcwd(dir, MAXDIR);
+    printf("%s%s", dir, "\n");
     return 1;
 }
+
 int smallsh_kill(char **args)
 {
+    pid_t pid = atoi(args[1]);
+    if (args[1] == NULL){
+        fprintf(stderr, "SmallSH: для завершения работы оболочки используйте exit\n");
+        return 1;
+    }
+    if (pid == 0) {
+        fprintf(stderr, "SmallSH: необходимо ввести pid процесса\n");
+    } else {
+        if (kill(pid, SIGTERM) != 0) {
+            perror("SmallSH");
+        }
+    }
     return 1;
 }
 
 int smallsh_declare(char **args)
 {
-    
     return 1;
 }
 int smallsh_help(char **args)
