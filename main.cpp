@@ -18,6 +18,8 @@
 #include <map>
 #include <string>
 #include <list>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 using namespace std;
 /*
@@ -31,7 +33,7 @@ using namespace std;
 #define SMALLSH_TOK_DELIM " \t\r\n\a"
 #define SMALLSH_TOK_PARSE ";"
 #define MAXDIR 1024
-#define NUM_SHIELD_SYM 6
+#define NUM_SHIELD_SYM 9
 /*
 *
 * Раздел объявления прототипов
@@ -44,9 +46,9 @@ char*  command_read_line();
 // Разбиение строки на массив введенных значений
 char** command_split_line(char* line, char* TOKEN);
 // Выполнение команды с её параметрами
-int    command_execute(bool background, char** args);
+int    command_execute(bool background, int redirection_type, char* redirection_filename, char** args);
 // Выполнение внешних команд
-int    command_launch(bool background, char **args);
+int    command_launch(bool background, int redirection_type, char* redirection_filename, char **args);
 // Экранирование специальных символов
 string command_shield(char *line);
 // разэкранирование символов перед выполнением команды
@@ -54,8 +56,14 @@ char** command_unshield(char**line);
 // удаление коментариев из строки, если # не была экранирована
 char*  command_strip_comments(char* line);
 // проверяем, есть ли символ, обозначающий background процесс
-bool  command_find_background(char* line);
+bool   command_find_background(char* line);
 char*  command_strip_background(char* line);
+// ищем в строке символы перенаправления
+int    command_find_redirection(char* line);
+// считываем имя файла для перенаправления
+char*  command_get_redirection_filename(int redirection_type, char* line);
+// удаляем > или < из строки, чтобы не передавать его исполняемой программе
+char*  command_strip_redirection(int redirection_type, char* line);
 /*
  *
  * Объявление функций для встроенных команд оболочки:
@@ -113,7 +121,10 @@ std::string shield_symbol[NUM_SHIELD_SYM] = {
         "\\$",
         "\\&",
         "\\|",
-        "\\#"
+        "\\#",
+        "\\;",
+        "\\>",
+        "\\<"
 };
 std::string replace_symbol[NUM_SHIELD_SYM] = {
         "%space%",
@@ -121,7 +132,10 @@ std::string replace_symbol[NUM_SHIELD_SYM] = {
         "%bucks%",
         "%and%",
         "%or%",
-        "%jail%"
+        "%jail%",
+        "%semicolon%",
+        "more",
+        "less"
 };
 std::string unshield_symbol[NUM_SHIELD_SYM] = {
         " ",
@@ -129,7 +143,10 @@ std::string unshield_symbol[NUM_SHIELD_SYM] = {
         "$",
         "&",
         "|",
-        "#"
+        "#",
+        ";",
+        ">",
+        "<"
 };
 /*
 *
@@ -174,12 +191,21 @@ int command_loop() {
             bool exec_params = command_find_background(subline[count]);
             // удаляем & из строки, чтобы не передавать его исполняемой программе
             subline[count] = command_strip_background(subline[count]);
+            // ищем в строке символы перенаправления
+            int redirection_type = command_find_redirection(subline[count]);
+            char* redirection_filename = "";
+            if (redirection_type != 0){
+                // считываем имя файла для перенаправления
+                redirection_filename = command_get_redirection_filename(redirection_type, subline[count]);
+                // удаляем > или < из строки, чтобы не передавать его исполняемой программе
+                subline[count] = command_strip_redirection(redirection_type, subline[count]);
+            }
             // разделяем строку на команду и её параметры
             args = command_split_line(subline[count], SMALLSH_TOK_DELIM);
             // производим обратное преобразование спецсимволов
             args = command_unshield(args);
-            // выполняем команду с параметрами - ЗДЕСЬ И УЗНАЮ, ЧТО ВСЕ ЭЛЕМЕНТЫ args стали равны последнему значению
-            status = command_execute(exec_params,args);
+            // выполняем команду с параметрами
+            status = command_execute(exec_params,redirection_type,redirection_filename,args);
             count++;
         }
         count = 0;
@@ -274,7 +300,7 @@ char** command_split_line(char* line, char* TOKEN){
  * а если команды нет в списке встроенных - выполняет соответствующую программу
  *
  */
-int command_execute(bool background, char** args) {
+int command_execute(bool background, int redirection_type, char* redirection_filename, char** args) {
     int i;
 
     if (args[0] == NULL) {
@@ -289,23 +315,52 @@ int command_execute(bool background, char** args) {
         }
     }
     // если введенная команда не входит в список встроенных - выполняем её
-    return command_launch(background, args);
+    return command_launch(background,redirection_type,redirection_filename,  args);
 }
 
-int command_launch(bool background, char **args)
+int command_launch(bool background, int redirection_type, char* redirection_filename, char **args)
 {
     pid_t pid, wpid;
     int status;
     // форк текущего процесса
     pid = fork();
     if (pid == 0) {
-        // Выполняем дочерний процесс, передавая ему команду с параметрами
-        if (execvp(args[0], args) == -1) {
-            // Выводим информацию об ошибке
-            perror("SmallSH");
+        if (redirection_type == 0) {
+            // Выполняем дочерний процесс, передавая ему команду с параметрами
+            if (execvp(args[0], args) == -1) {
+                // Выводим информацию об ошибке
+                perror("SmallSH");
+            }
+            // Завершаем дочерний процесс
+            exit(EXIT_FAILURE);
         }
-        // Завершаем дочерний процесс
-        exit(EXIT_FAILURE);
+        if (redirection_type == 1) {
+            int fd = open(redirection_filename, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+            if (fd < 0) { perror("open"); abort(); }
+            if (dup2(fd, 1) < 0) { perror("dup2"); abort(); }
+            close(fd);
+            // Выполняем дочерний процесс, передавая ему команду с параметрами
+            if (execvp(args[0], args) == -1) {
+                // Выводим информацию об ошибке
+                perror("SmallSH");
+            }
+            // Завершаем дочерний процесс
+            exit(EXIT_FAILURE);
+        }
+        if (redirection_type == -1) {
+            int fd = open(redirection_filename, O_RDONLY|O_CREAT, 0644);
+            if (fd < 0) { perror("open"); abort(); }
+            if (dup2(fd, 0) < 0) { perror("dup2"); abort(); }
+            //close(fd);
+            // Выполняем дочерний процесс, передавая ему команду с параметрами
+            if (execvp(args[0], args) == -1) {
+                // Выводим информацию об ошибке
+                perror("SmallSH");
+            }
+            close(fd);
+            // Завершаем дочерний процесс
+            exit(EXIT_FAILURE);
+        }
     }
     else if (pid < 0) {
         // Ошибка при форкинге
@@ -398,6 +453,52 @@ char*  command_strip_background(char* line){
 }
 /*
  *
+ * ищем в строке символы перенаправления
+ *
+ */
+int command_find_redirection(char* line){
+    std::string str = line;
+    // ищем символ > в строке
+    if ((int)str.find('>') >= 0) return 1;
+    // ищем символ < в строке
+    else if ((int)str.find('<') >= 0) return -1;
+    // если ничего не нашли - возвращам 0
+    else return 0;
+}
+/*
+ *
+ * считываем имя файла для перенаправления
+ *
+ */
+char*  command_get_redirection_filename(int redirection_type, char* line){
+    char* delim = ">";
+    if (redirection_type == 1) delim = ">";
+    else delim = "<";
+    char *strs = line;
+    char *primer = strtok(strs, delim);
+    char *other = strtok(0, "");
+    return other;
+}
+/*
+ *
+ * удаляем > или < из строки, чтобы не передавать его исполняемой программе
+ *
+ */
+char*  command_strip_redirection(int redirection_type, char* line){
+    char *delim = ">";
+    if (redirection_type == 1) delim = ">";
+    else delim = "<";
+    // если первый символ - < >, возвращаем пустую строку
+    if (line[0]=='<' or line[0]=='>') return "";
+    // обрезаем стрку до < или до >
+    return strtok(line, delim);
+}
+
+
+
+
+/*
+ *
  * Реализации встроенных в интепретатор функций
  *
 */
@@ -478,7 +579,7 @@ int smallsh_help(char **args)
            "# Launch foreign programs in background and excec ls -la\n");
     printf("[PID]15322\n");
     printf("[PID]15323\n");
-
+    printf("> echo 'You can redirect command output to file' >message.txt \n");
 
     printf("\nUse man to get information about other commands\n");
     return 1;
