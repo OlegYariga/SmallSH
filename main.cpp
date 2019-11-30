@@ -18,7 +18,6 @@
 #include <map>
 #include <string>
 #include <list>
-#include <algorithm>
 
 using namespace std;
 /*
@@ -30,8 +29,8 @@ using namespace std;
 #define SMALLSH_RL_BUFSIZE 1024
 #define SMALLSH_TOK_BUFSIZE 64
 #define SMALLSH_TOK_DELIM " \t\r\n\a"
+#define SMALLSH_TOK_PARSE ";"
 #define MAXDIR 1024
-#define NAME variables
 /*
 *
 * Раздел объявления прототипов
@@ -42,11 +41,15 @@ int    command_loop();
 // Функция, считывающая введенную строку
 char*  command_read_line();
 // Разбиение строки на массив введенных значений
-char** command_split_line(char* line);
+char** command_split_line(char* line, char* TOKEN);
 // Выполнение команды с её параметрами
 int    command_execute(char** args);
 // Выполнение внешних команд
 int    command_launch(char **args);
+// Экранирование специальных символов
+string command_shield(char *line);
+// разэкранирование символов перед выполнением команды
+char** command_unshield(char**line);
 /*
  *
  * Объявление функций для встроенных команд оболочки:
@@ -73,7 +76,7 @@ char *builtin_str[] = {
         "cd",
         "help",
         "exit",
-        "pwd",
+        "lpwd",
         "kill",
         "declare"
 };
@@ -115,16 +118,30 @@ int command_loop() {
     char *line;
     char **args;
     int status;
+    char **subline;
+    int count = 0;
+    string parseline, prs;
+    int bufsize = SMALLSH_TOK_BUFSIZE;
+    char **parseback = (char**)malloc(bufsize * sizeof(char*));
 
     do {
         // выводим приглашение командной строки
         printf("> ");
         // считываем введенную строку
         line = command_read_line();
-        // разделяем строку на команду и её параметры
-        args = command_split_line(line);
-        // выполняем команду с параметрами
-        status = command_execute(args);
+        parseline = command_shield(line);
+        // разделяем строку на команды между ;
+        subline = command_split_line((char*)parseline.c_str(), SMALLSH_TOK_PARSE);
+        while (subline[count] != NULL) {
+            // разделяем строку на команду и её параметры
+            args = command_split_line(subline[count], SMALLSH_TOK_DELIM);
+            // производим обратное преобразование спецсимволов
+            args = command_unshield(args);
+            // выполняем команду с параметрами - ЗДЕСЬ И УЗНАЮ, ЧТО ВСЕ ЭЛЕМЕНТЫ args стали равны последнему значению
+            status = command_execute(args);
+            count++;
+        }
+        count = 0;
         free(line);
         free(args);
     } while (status);
@@ -150,7 +167,6 @@ char* command_read_line(){
     while (true) {
         // Читаем символ
         c = getchar();
-
         // При встрече с EOF заменяем его нуль-терминатором и возвращаем буфер
         if (c == EOF || c == '\n') {
             buffer[position] = '\0';
@@ -176,11 +192,13 @@ char* command_read_line(){
 }
 /*
 *
-* Разделяет введенную строку на аргументы по символам, определенным в SMALLSH_TOK_DELIM
+* Разделяет введенную строку на аргументы по символам, определенным в SMALLSH_TOK_DELIM или SMALLSH_TOK_PARSE
 *
 */
-char** command_split_line(char* line){
+char** command_split_line(char* line, char* TOKEN){
+    // определяем размер буфера для команд
     int bufsize = SMALLSH_TOK_BUFSIZE, position = 0;
+    // выделяем память под буфер
     char **tokens = (char**)malloc(bufsize * sizeof(char*));
     char *token;
 
@@ -188,22 +206,23 @@ char** command_split_line(char* line){
         fprintf(stderr, "SmallSH: memory allocation error. Exit...\n");
         exit(EXIT_FAILURE);
     }
-
-    token = strtok(line, SMALLSH_TOK_DELIM);
+    // разделяем строку на параметры, по разделителю token (SMALLSH_TOK_DELIM или SMALLSH_TOK_PARSE)
+    token = strtok(line, TOKEN);
     while (token != NULL) {
         tokens[position] = token;
         position++;
-
+        // если выделенного буфера не хватает, то выделяем доп. память равную размеру буфера
         if (position >= bufsize) {
             bufsize += SMALLSH_TOK_BUFSIZE;
             tokens = (char**)realloc(tokens, bufsize * sizeof(char*));
+            // выводим ошибку выделения памяти
             if (!tokens) {
                 fprintf(stderr, "SmallSH: memory allocation error. Exit...\n");
                 exit(EXIT_FAILURE);
             }
         }
-
-        token = strtok(NULL, SMALLSH_TOK_DELIM);
+        // идем к следующему разделителю
+        token = strtok(NULL, TOKEN);
     }
     tokens[position] = NULL;
     return tokens;
@@ -221,12 +240,14 @@ int command_execute(char** args) {
         // Была введена пустая команда.
         return 1;
     }
-
+    // читаем список встроенных команд и ищем там введенную команду
     for (i = 0; i < smallsh_num_builtins(); i++) {
         if (strcmp(args[0], builtin_str[i]) == 0) {
+            // если нашли, выполняем соотв. функцию и возвращаем результат
             return (*builtin_func[i])(args);
         }
     }
+    // если введенная команда не входит в список встроенных - выполняем её
     return command_launch(args);
 }
 
@@ -260,15 +281,51 @@ int command_launch(char **args)
 }
 /*
  *
+ * Экранирование специальных символов путем замены их на другие последовательности
+ *
+ */
+string command_shield(char *line)
+{
+    std::string a = line;
+    std::string b = "\\ ";
+    std::string c = "@space@";
+    std::string::size_type ind;
+    while((ind=a.find(b))!=std::string::npos) a.replace(ind, b.size(), c);
+    return a;
+}
+/*
+ *
+ * Замена экранирующих последовательностей перед выполнением команды
+ *
+ */
+char** command_unshield(char **line)
+{
+    int it = 0;
+    while (line[it] != NULL) {
+        std::string a = line[it];
+        std::string b = "@space@";
+        std::string c = " ";
+        std::string::size_type ind;
+        while ((ind = a.find(b)) != std::string::npos) a.replace(ind, b.size(), c);
+        strcpy( line[it], a.c_str() );
+        it++;
+    }
+
+    return line;
+}
+/*
+ *
  * Реализации встроенных в интепретатор функций
  *
 */
 int smallsh_cd(char **args)
 {
     if (args[1] == NULL) {
+        // если не введен аргумент для CD - выдаем сообщение об ошибке
         fprintf(stderr, "SmallSH: ожидается аргумент для \"cd\"\n");
         return 1;
     } else {
+        // выполняем переход в указанный каталог
         if (chdir(args[1]) != 0) {
             perror("SmallSH");
         }
@@ -278,22 +335,28 @@ int smallsh_cd(char **args)
 
 int smallsh_pwd(char **args)
 {
+    // определяем буфер для результата команды pwd
     char dir[MAXDIR];
+    // выполняем pwd
     getcwd(dir, MAXDIR);
+    // выводим результат выполнения команды
     printf("%s%s", dir, "\n");
     return 1;
 }
 
 int smallsh_kill(char **args)
 {
+    // преобразование pid процесса в int
     pid_t pid = atoi(args[1]);
     if (args[1] == NULL){
         fprintf(stderr, "SmallSH: для завершения работы оболочки используйте exit\n");
         return 1;
     }
     if (pid == 0) {
+        // если pid не введен, то выдаем сообщение об ошибке
         fprintf(stderr, "SmallSH: необходимо ввести pid процесса\n");
     } else {
+        // посылаем процессу сигнал "мягкого" завершения
         if (kill(pid, SIGTERM) != 0) {
             perror("SmallSH");
         }
@@ -315,7 +378,14 @@ int smallsh_help(char **args)
     for (i = 0; i < smallsh_num_builtins(); i++) {
         printf("  %s\n", builtin_str[i]);
     }
-
+    printf("Commands examples:\n");
+    printf("> cd ..\n");
+    printf("> pwd\n");
+    printf("/home/user/Рабочий стол/SmallSH\n");
+    printf("> cd cmake-build-debug; pwd; ls -a; exit\n");
+    printf("/home/user/Рабочий стол/SmallSH/cmake-build-debug\n");
+    printf(".   CMakeCache.txt  cmake_install.cmake  SmallSH      variables\n");
+    printf("..  CMakeFiles\t    Makefile\t\t SmallSH.cbp\n");
     printf("Use man to get information about other commands\n");
     return 1;
 }
