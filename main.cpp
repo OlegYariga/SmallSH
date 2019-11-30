@@ -31,6 +31,7 @@ using namespace std;
 #define SMALLSH_TOK_DELIM " \t\r\n\a"
 #define SMALLSH_TOK_PARSE ";"
 #define MAXDIR 1024
+#define NUM_SHIELD_SYM 6
 /*
 *
 * Раздел объявления прототипов
@@ -45,11 +46,15 @@ char** command_split_line(char* line, char* TOKEN);
 // Выполнение команды с её параметрами
 int    command_execute(char** args);
 // Выполнение внешних команд
-int    command_launch(char **args);
+int    command_launch(bool background, char **args);
 // Экранирование специальных символов
 string command_shield(char *line);
 // разэкранирование символов перед выполнением команды
 char** command_unshield(char**line);
+// удаление коментариев из строки, если # не была экранирована
+char*  command_strip_comments(char* line);
+// проверяем, есть ли символ, обозначающий background процесс
+
 /*
  *
  * Объявление функций для встроенных команд оболочки:
@@ -97,6 +102,35 @@ int smallsh_num_builtins() {
         return sizeof(builtin_str) / sizeof(char *);
 }
 /*
+ *
+ * Массив экранируемых символов и символы для их замены
+ *
+ */
+std::string shield_symbol[NUM_SHIELD_SYM] = {
+        "\\ ",
+        "\\n",
+        "\\$",
+        "\\&",
+        "\\|",
+        "\\#"
+};
+std::string replace_symbol[NUM_SHIELD_SYM] = {
+        "%space%",
+        "%return%",
+        "%bucks%",
+        "%and%",
+        "%or%",
+        "%jail%"
+};
+std::string unshield_symbol[NUM_SHIELD_SYM] = {
+        " ",
+        "\n",
+        "$",
+        "&",
+        "|",
+        "#"
+};
+/*
 *
 * Точка входа для консольного приложения
 *
@@ -121,17 +155,19 @@ int command_loop() {
     char **subline;
     int count = 0;
     string parseline, prs;
-    int bufsize = SMALLSH_TOK_BUFSIZE;
-    char **parseback = (char**)malloc(bufsize * sizeof(char*));
+    char* line_no_comments;
 
     do {
         // выводим приглашение командной строки
         printf("> ");
         // считываем введенную строку
         line = command_read_line();
+        // экранируем символы в строке
         parseline = command_shield(line);
+        // удаляем все неэкранированные коментарии
+        line_no_comments = command_strip_comments((char*)parseline.c_str());
         // разделяем строку на команды между ;
-        subline = command_split_line((char*)parseline.c_str(), SMALLSH_TOK_PARSE);
+        subline = command_split_line(line_no_comments, SMALLSH_TOK_PARSE);
         while (subline[count] != NULL) {
             // разделяем строку на команду и её параметры
             args = command_split_line(subline[count], SMALLSH_TOK_DELIM);
@@ -248,10 +284,10 @@ int command_execute(char** args) {
         }
     }
     // если введенная команда не входит в список встроенных - выполняем её
-    return command_launch(args);
+    return command_launch(false, args);
 }
 
-int command_launch(char **args)
+int command_launch(bool background, char **args)
 {
     pid_t pid, wpid;
     int status;
@@ -271,11 +307,15 @@ int command_launch(char **args)
         perror("SmallSH");
     }
     else {
-        // Родительский процесс
-        do {
-            // ожидаем возврата ответа от дочернего процесса
-            wpid = waitpid(pid, &status, WUNTRACED);
-        } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+        if (!background) {
+            // Родительский процесс
+            do {
+                // ожидаем возврата ответа от дочернего процесса
+                wpid = waitpid(pid, &status, WUNTRACED);
+            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+        }else{
+            printf("[PID] %d\n", pid);
+        }
     }
     return 1;
 }
@@ -286,11 +326,15 @@ int command_launch(char **args)
  */
 string command_shield(char *line)
 {
+    // считываем строку
     std::string a = line;
-    std::string b = "\\ ";
-    std::string c = "@space@";
-    std::string::size_type ind;
-    while((ind=a.find(b))!=std::string::npos) a.replace(ind, b.size(), c);
+    // поизводим поиск символов для замены
+    for (int i=0; i<NUM_SHIELD_SYM; i++) {
+        std::string b = shield_symbol[i];
+        std::string c = replace_symbol[i];
+        std::string::size_type ind;
+        while ((ind = a.find(b)) != std::string::npos) a.replace(ind, b.size(), c);
+    }
     return a;
 }
 /*
@@ -301,17 +345,33 @@ string command_shield(char *line)
 char** command_unshield(char **line)
 {
     int it = 0;
+    // проходим в цикле по всем строкам в массиве
     while (line[it] != NULL) {
+        // считываем строку
         std::string a = line[it];
-        std::string b = "@space@";
-        std::string c = " ";
-        std::string::size_type ind;
-        while ((ind = a.find(b)) != std::string::npos) a.replace(ind, b.size(), c);
-        strcpy( line[it], a.c_str() );
+        // производим поиск в массиве замененных символов
+        for (int i=0; i<NUM_SHIELD_SYM; i++) {
+            std::string b = replace_symbol[i];
+            std::string c = unshield_symbol[i];
+            std::string::size_type ind;
+            while ((ind = a.find(b)) != std::string::npos) a.replace(ind, b.size(), c);
+        }
+        // заменяем исходную строку на обработанную
+        strcpy(line[it], a.c_str());
         it++;
     }
-
     return line;
+}
+/*
+ *
+ * Удаляем всю часть строки после #, если она не была экранирована
+ *
+ */
+char*  command_strip_comments(char* line){
+    // если первый символ - решетка, возвращаем пустую строку
+    if (line[0]=='#') return "";
+    // обрезаем стрку до решетки
+    return strtok(line, "#");
 }
 /*
  *
@@ -386,6 +446,9 @@ int smallsh_help(char **args)
     printf("/home/user/Рабочий стол/SmallSH/cmake-build-debug\n");
     printf(".   CMakeCache.txt  cmake_install.cmake  SmallSH      variables\n");
     printf("..  CMakeFiles\t    Makefile\t\t SmallSH.cbp\n");
+    printf("> cd .. # You can type comment after #\n");
+    printf("> mkdir \\#FOLDER\\#; ls; cd /home/user/Рабочий\\ стол; pwd  # Or you can shield some symbols\n");
+
     printf("Use man to get information about other commands\n");
     return 1;
 }
