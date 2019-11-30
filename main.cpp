@@ -44,7 +44,7 @@ char*  command_read_line();
 // Разбиение строки на массив введенных значений
 char** command_split_line(char* line, char* TOKEN);
 // Выполнение команды с её параметрами
-int    command_execute(char** args);
+int    command_execute(bool background, char** args);
 // Выполнение внешних команд
 int    command_launch(bool background, char **args);
 // Экранирование специальных символов
@@ -54,7 +54,8 @@ char** command_unshield(char**line);
 // удаление коментариев из строки, если # не была экранирована
 char*  command_strip_comments(char* line);
 // проверяем, есть ли символ, обозначающий background процесс
-
+bool  command_find_background(char* line);
+char*  command_strip_background(char* line);
 /*
  *
  * Объявление функций для встроенных команд оболочки:
@@ -169,12 +170,16 @@ int command_loop() {
         // разделяем строку на команды между ;
         subline = command_split_line(line_no_comments, SMALLSH_TOK_PARSE);
         while (subline[count] != NULL) {
+            // ищем в строке символ & для запуска приложения в фоновом режиме
+            bool exec_params = command_find_background(subline[count]);
+            // удаляем & из строки, чтобы не передавать его исполняемой программе
+            subline[count] = command_strip_background(subline[count]);
             // разделяем строку на команду и её параметры
             args = command_split_line(subline[count], SMALLSH_TOK_DELIM);
             // производим обратное преобразование спецсимволов
             args = command_unshield(args);
             // выполняем команду с параметрами - ЗДЕСЬ И УЗНАЮ, ЧТО ВСЕ ЭЛЕМЕНТЫ args стали равны последнему значению
-            status = command_execute(args);
+            status = command_execute(exec_params,args);
             count++;
         }
         count = 0;
@@ -269,7 +274,7 @@ char** command_split_line(char* line, char* TOKEN){
  * а если команды нет в списке встроенных - выполняет соответствующую программу
  *
  */
-int command_execute(char** args) {
+int command_execute(bool background, char** args) {
     int i;
 
     if (args[0] == NULL) {
@@ -284,7 +289,7 @@ int command_execute(char** args) {
         }
     }
     // если введенная команда не входит в список встроенных - выполняем её
-    return command_launch(false, args);
+    return command_launch(background, args);
 }
 
 int command_launch(bool background, char **args)
@@ -375,6 +380,24 @@ char*  command_strip_comments(char* line){
 }
 /*
  *
+ * Ищем в строке с командой символ & и удаляем его
+ *
+ */
+bool  command_find_background(char* line){
+    std::string str = line;
+    // ищем символ & в строке
+    int position = str.find('&');
+    if (position == -1) return false;
+    return true;
+}
+char*  command_strip_background(char* line){
+    // если первый символ - &, возвращаем пустую строку
+    if (line[0]=='&') return "";
+    // обрезаем стрку до &
+    return strtok(line, "&");
+}
+/*
+ *
  * Реализации встроенных в интепретатор функций
  *
 */
@@ -448,8 +471,16 @@ int smallsh_help(char **args)
     printf("..  CMakeFiles\t    Makefile\t\t SmallSH.cbp\n");
     printf("> cd .. # You can type comment after #\n");
     printf("> mkdir \\#FOLDER\\#; ls; cd /home/user/Рабочий\\ стол; pwd  # Or you can shield some symbols\n");
+    printf("> gnome-calculator # Launch foreign program\n");
+    printf("> gnome-calculator & # Launch foreign program in background\n");
+    printf("[PID]18536\n");
+    printf("> gnome-calculator &; sensible-browser &; ls -la "
+           "# Launch foreign programs in background and excec ls -la\n");
+    printf("[PID]15322\n");
+    printf("[PID]15323\n");
 
-    printf("Use man to get information about other commands\n");
+
+    printf("\nUse man to get information about other commands\n");
     return 1;
 }
 
