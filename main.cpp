@@ -33,7 +33,7 @@ using namespace std;
 #define SMALLSH_TOK_DELIM " \t\r\n\a"
 #define SMALLSH_TOK_PARSE ";"
 #define MAXDIR 1024
-#define NUM_SHIELD_SYM 9
+#define NUM_SHIELD_SYM 10
 /*
 *
 * Раздел объявления прототипов
@@ -124,7 +124,8 @@ std::string shield_symbol[NUM_SHIELD_SYM] = {
         "\\#",
         "\\;",
         "\\>",
-        "\\<"
+        "\\<",
+        "\\\\"
 };
 std::string replace_symbol[NUM_SHIELD_SYM] = {
         "%space%",
@@ -134,8 +135,10 @@ std::string replace_symbol[NUM_SHIELD_SYM] = {
         "%or%",
         "%jail%",
         "%semicolon%",
-        "more",
-        "less"
+        "%more%",
+        "%less%",
+        "%slash%"
+
 };
 std::string unshield_symbol[NUM_SHIELD_SYM] = {
         " ",
@@ -146,7 +149,8 @@ std::string unshield_symbol[NUM_SHIELD_SYM] = {
         "#",
         ";",
         ">",
-        "<"
+        "<",
+        "\\"
 };
 /*
 *
