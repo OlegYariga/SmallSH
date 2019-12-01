@@ -106,7 +106,7 @@ int (*builtin_func[]) (char **) = {
 std::multimap<string, string> Map;
 std::list<string> Key;
 std::list<string> Val;
-// Список встроенных команд
+// Количество встроенных команд
 int smallsh_num_builtins() {
         return sizeof(builtin_str) / sizeof(char *);
 }
@@ -240,8 +240,13 @@ char* command_read_line(){
         c = getchar();
         // При встрече с EOF заменяем его нуль-терминатором и возвращаем буфер
         if (c == EOF || c == '\n') {
-            buffer[position] = '\0';
-            return buffer;
+            if (c == '\n' && buffer[position-1] == '\\') {
+                buffer[position-1] = ' ';
+                buffer[position] = ' ';
+            }else {
+                buffer[position] = '\0';
+                return buffer;
+            }
         }
         else {
             buffer[position] = c;
@@ -321,7 +326,11 @@ int command_execute(bool background, int redirection_type, char* redirection_fil
     // если введенная команда не входит в список встроенных - выполняем её
     return command_launch(background,redirection_type,redirection_filename,  args);
 }
-
+/*
+ *
+ * Выполнение внешней программы
+ *
+ */
 int command_launch(bool background, int redirection_type, char* redirection_filename, char **args)
 {
     pid_t pid, wpid;
@@ -584,6 +593,12 @@ int smallsh_help(char **args)
     printf("[PID]15322\n");
     printf("[PID]15323\n");
     printf("> echo 'You can redirect command output to file' >message.txt \n");
+
+    printf("\n> clear; \\\n");
+    printf("echo 'You can type large commands'; \\\n");
+    printf("ls -la >ls-result.txt; \\\n");
+    printf("gnome-calculator &; \\\n");
+    printf("# use '\\' to shield new-line symbol\n");
 
     printf("\nUse man to get information about other commands\n");
     return 1;
