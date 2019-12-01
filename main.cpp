@@ -387,7 +387,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
         // если было обнаружено перенаправление ввода
         if (redirection_type == -1) {
             // открываем файл на чтение, если такого файла нет - создаем новый
-            int fd = open(redirection_filename, O_RDONLY|O_CREAT, 0644);
+            int fd = open(redirection_filename, O_RDONLY);
             if (fd < 0) { perror("open"); abort(); }
             // переназначаем дескриптор файла на stdin
             if (dup2(fd, 0) < 0) { perror("dup2"); abort(); }
@@ -400,6 +400,11 @@ int command_launch(bool background, int redirection_type, char* redirection_file
             close(fd);
             // Завершаем дочерний процесс
             exit(EXIT_FAILURE);
+        }
+        if (background){
+            int targetFD = open("/dev/null", O_RDONLY);
+            if (dup2(targetFD, STDIN_FILENO) == -1) { fprintf(stderr, "Error redirecting"); exit(1); };
+            if (dup2(targetFD, STDOUT_FILENO) == -1) { fprintf(stderr, "Error redirecting"); exit(1); };
         }
     }
     else if (pid < 0) {
@@ -649,6 +654,15 @@ int smallsh_help(char **args)
     printf("[PID]15322\n");
     printf("[PID]15323\n");
     printf("> echo 'You can redirect command output to file' >message.txt \n");
+    printf("> cat<f\n");
+    printf("Hub\n");
+    printf("Middle\n");
+    printf("Angr\n");
+    printf("> sort<f\n");
+    printf("Angr\n");
+    printf("Middle\n");
+    printf("Hub\n");
+
     printf("> gnome-calculator \n");
     printf("^C # Press CTRL+C to interrupt program\n");
     printf("> gnome-calculator \n");
