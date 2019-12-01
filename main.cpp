@@ -229,13 +229,7 @@ int command_loop() {
             status = command_execute(exec_params,redirection_type,redirection_filename,args);
             count++;
         }
-        count = 0;/*
-        try {
-            free(line);
-            free(args);
-        }catch (std::exception& e){
-            continue;
-        }*/
+        count = 0;
     } while (status);
     free(line);
     free(args);
@@ -361,6 +355,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
     // форк текущего процесса
     pid = fork();
     if (pid == 0) {
+        // дочерний процесс будет игнорировать сигналы CTRL+C и CTRL+Z послупающие из оболочки
         signal(SIGINT, SIG_IGN);
         signal(SIGTSTP, SIG_IGN);
         if (redirection_type == 0) {
@@ -372,10 +367,14 @@ int command_launch(bool background, int redirection_type, char* redirection_file
             // Завершаем дочерний процесс
             exit(EXIT_FAILURE);
         }
+        // если было обнаружено перенаправление вывода
         if (redirection_type == 1) {
+            // создаем новый файл
             int fd = open(redirection_filename, O_WRONLY|O_TRUNC|O_CREAT, 0644);
             if (fd < 0) { perror("open"); abort(); }
+            // переназначаем дескриптор файла на stdout
             if (dup2(fd, 1) < 0) { perror("dup2"); abort(); }
+            // закрываем файл
             close(fd);
             // Выполняем дочерний процесс, передавая ему команду с параметрами
             if (execvp(args[0], args) == -1) {
@@ -385,16 +384,19 @@ int command_launch(bool background, int redirection_type, char* redirection_file
             // Завершаем дочерний процесс
             exit(EXIT_FAILURE);
         }
+        // если было обнаружено перенаправление ввода
         if (redirection_type == -1) {
+            // открываем файл на чтение, если такого файла нет - создаем новый
             int fd = open(redirection_filename, O_RDONLY|O_CREAT, 0644);
             if (fd < 0) { perror("open"); abort(); }
+            // переназначаем дескриптор файла на stdin
             if (dup2(fd, 0) < 0) { perror("dup2"); abort(); }
-            //close(fd);
             // Выполняем дочерний процесс, передавая ему команду с параметрами
             if (execvp(args[0], args) == -1) {
                 // Выводим информацию об ошибке
                 perror("SmallSH");
             }
+            // закрываем файла
             close(fd);
             // Завершаем дочерний процесс
             exit(EXIT_FAILURE);
@@ -406,6 +408,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
     }
     else {
         if (!background) {
+            // считываем pid дочернего процесса
             CHILD_PID = pid;
             // Родительский процесс
             do {
@@ -419,6 +422,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
             printf("[PID] %d\n", pid);
         }
     }
+    // обнуляем pid дочернего процесса
     CHILD_PID = 0;
     return 1;
 }
@@ -542,15 +546,21 @@ char*  command_strip_redirection(int redirection_type, char* line){
  *
  */
 void sigINThandler(int signum){
+    // если дочерний процесс в данный момент работает
     if (CHILD_PID != 0){
+        // посылаем процессу сигнал sigterm
         kill(CHILD_PID, SIGTERM);
+        // выводим и обнуляем pid процесса
         printf("Program [%d] terminated\n", CHILD_PID);
         CHILD_PID = 0;
     }
 }
 void sigTSTPhandler(int signum){
+    // если дочерний процесс в данный момент работает
     if (CHILD_PID != 0){
+        // посылаем процессу сигнал SIGSTOP
         kill(CHILD_PID, SIGSTOP);
+        // выводим и обнуляем pid процесса
         printf("Program [%d] stopped\n", CHILD_PID);
         CHILD_PID = 0;
     }
