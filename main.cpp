@@ -83,6 +83,19 @@ int smallsh_help(char **args);
 int smallsh_exit(char **args);
 /*
  *
+ * Обработчики сигналов
+ *
+ */
+void sigINThandler(int signum);
+void sigTSTPhandler(int signum);
+/*
+ *
+ * pid процесса, который выполняется в данный момент в foreground режиме
+ *
+ */
+int CHILD_PID = 0;
+/*
+ *
  * Список встроенных команд, за которыми следуют соответствующие функции
  *
  */
@@ -159,6 +172,10 @@ std::string unshield_symbol[NUM_SHIELD_SYM] = {
 */
 int main(int argc, char **argv)
 {
+    // регистрируем обработчики сигналов
+    signal(SIGINT, sigINThandler);
+    signal(SIGTSTP, sigTSTPhandler);
+
     // Загрузка файлов конфигурации при их наличии.
     // Запуск цикла команд.
     command_loop();
@@ -212,10 +229,16 @@ int command_loop() {
             status = command_execute(exec_params,redirection_type,redirection_filename,args);
             count++;
         }
-        count = 0;
-        free(line);
-        free(args);
+        count = 0;/*
+        try {
+            free(line);
+            free(args);
+        }catch (std::exception& e){
+            continue;
+        }*/
     } while (status);
+    free(line);
+    free(args);
     return 0;
 }
 /*
@@ -338,6 +361,8 @@ int command_launch(bool background, int redirection_type, char* redirection_file
     // форк текущего процесса
     pid = fork();
     if (pid == 0) {
+        signal(SIGINT, SIG_IGN);
+        signal(SIGTSTP, SIG_IGN);
         if (redirection_type == 0) {
             // Выполняем дочерний процесс, передавая ему команду с параметрами
             if (execvp(args[0], args) == -1) {
@@ -381,8 +406,12 @@ int command_launch(bool background, int redirection_type, char* redirection_file
     }
     else {
         if (!background) {
+            CHILD_PID = pid;
             // Родительский процесс
             do {
+                // проверяем, сработал ли обработчик сигнала
+                if (CHILD_PID == 0)
+                    return 1;
                 // ожидаем возврата ответа от дочернего процесса
                 wpid = waitpid(pid, &status, WUNTRACED);
             } while (!WIFEXITED(status) && !WIFSIGNALED(status));
@@ -390,6 +419,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
             printf("[PID] %d\n", pid);
         }
     }
+    CHILD_PID = 0;
     return 1;
 }
 /*
@@ -506,9 +536,25 @@ char*  command_strip_redirection(int redirection_type, char* line){
     // обрезаем стрку до < или до >
     return strtok(line, delim);
 }
-
-
-
+/*
+ *
+ * Обработчики сигналов
+ *
+ */
+void sigINThandler(int signum){
+    if (CHILD_PID != 0){
+        kill(CHILD_PID, SIGTERM);
+        printf("Program [%d] terminated\n", CHILD_PID);
+        CHILD_PID = 0;
+    }
+}
+void sigTSTPhandler(int signum){
+    if (CHILD_PID != 0){
+        kill(CHILD_PID, SIGSTOP);
+        printf("Program [%d] stopped\n", CHILD_PID);
+        CHILD_PID = 0;
+    }
+}
 
 /*
  *
@@ -593,6 +639,12 @@ int smallsh_help(char **args)
     printf("[PID]15322\n");
     printf("[PID]15323\n");
     printf("> echo 'You can redirect command output to file' >message.txt \n");
+    printf("> gnome-calculator \n");
+    printf("^C # Press CTRL+C to interrupt program\n");
+    printf("> gnome-calculator \n");
+    printf("^Z # Press CTRL+Z to stop program\n");
+    printf("> gnome-calculator & \n");
+    printf("^C # CTRL+C and CTRL+Z do not affect to programs in background mode\n");
 
     printf("\n> clear; \\\n");
     printf("echo 'You can type large commands'; \\\n");
