@@ -405,7 +405,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
         }
         // для всех background процессов перенаправляем ввод-вывод в /dev/null
         if (background){
-            int targetFD = open("/dev/null", O_RDONLY);
+            int targetFD = open("/dev/null", O_WRONLY);
             if (dup2(targetFD, STDIN_FILENO) == -1) { fprintf(stderr, "Error redirecting"); exit(1); };
             if (dup2(targetFD, STDOUT_FILENO) == -1) { fprintf(stderr, "Error redirecting"); exit(1); };
         }
