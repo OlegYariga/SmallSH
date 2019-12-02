@@ -15,11 +15,11 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <dirent.h>
-#include <map>
 #include <string>
-#include <list>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <map>
+
 
 using namespace std;
 /*
@@ -116,9 +116,8 @@ int (*builtin_func[]) (char **) = {
         &smallsh_declare,
 };
 // хранит команды для declare
-std::multimap<string, string> Map;
-std::list<string> Key;
-std::list<string> Val;
+std::map <char*, char*> Map;
+
 // Количество встроенных команд
 int smallsh_num_builtins() {
         return sizeof(builtin_str) / sizeof(char *);
@@ -176,10 +175,9 @@ int main(int argc, char **argv)
     signal(SIGINT, sigINThandler);
     signal(SIGTSTP, sigTSTPhandler);
 
-    // Загрузка файлов конфигурации при их наличии.
     // Запуск цикла команд.
     command_loop();
-    // Выключение / очистка памяти.
+
     return 0;
 }
 /*
@@ -231,6 +229,7 @@ int command_loop() {
         }
         count = 0;
     } while (status);
+    // освобождаем занимаемую память
     free(line);
     free(args);
     return 0;
@@ -257,10 +256,12 @@ char* command_read_line(){
         c = getchar();
         // При встрече с EOF заменяем его нуль-терминатором и возвращаем буфер
         if (c == EOF || c == '\n') {
+            // проверяем, не экранировал ли пользователь символ переноса строки
             if (c == '\n' && buffer[position-1] == '\\') {
                 buffer[position-1] = ' ';
                 buffer[position] = ' ';
             }else {
+                // ставим терминатор и возвращаем строку
                 buffer[position] = '\0';
                 return buffer;
             }
@@ -355,9 +356,10 @@ int command_launch(bool background, int redirection_type, char* redirection_file
     // форк текущего процесса
     pid = fork();
     if (pid == 0) {
-        // дочерний процесс будет игнорировать сигналы CTRL+C и CTRL+Z послупающие из оболочки
+        // дочерний процесс будет игнорировать сигналы CTRL+C и CTRL+Z поступающие из оболочки
         signal(SIGINT, SIG_IGN);
         signal(SIGTSTP, SIG_IGN);
+        // если перенаправлений ввода-вывода нет
         if (redirection_type == 0) {
             // Выполняем дочерний процесс, передавая ему команду с параметрами
             if (execvp(args[0], args) == -1) {
@@ -401,6 +403,7 @@ int command_launch(bool background, int redirection_type, char* redirection_file
             // Завершаем дочерний процесс
             exit(EXIT_FAILURE);
         }
+        // для всех background процессов перенаправляем ввод-вывод в /dev/null
         if (background){
             int targetFD = open("/dev/null", O_RDONLY);
             if (dup2(targetFD, STDIN_FILENO) == -1) { fprintf(stderr, "Error redirecting"); exit(1); };
@@ -624,7 +627,30 @@ int smallsh_kill(char **args)
 
 int smallsh_declare(char **args)
 {
-    return 1;
+    // итератор по элементам словаря
+    std::map<char*, char*>::iterator i;
+    // если не введены ключ и значение, то выводим список всех переменных
+    if (args[1] == NULL && args[2] == NULL) {
+        for (i = Map.begin(); i != Map.end(); i++) {
+            printf("%s=%s\n", (*i).first, (*i).second);
+        }
+        return 1;
+    // если введен и ключ и значение - добавляем пару в словарь
+    }else if(args[1] != NULL && args[2] != NULL){
+        // выделяем память под длину ключа и значения
+        char *s_key = new char [1+strlen(args[1])];
+        char *s_val = new char [1+strlen(args[2])];
+        //копируем элементы из args в выделенную память
+        strcpy(s_key, args[1]);
+        strcpy(s_val, args[2]);
+        //добавляем пару в словарь
+        Map.insert(pair<char*, char*>(s_key,s_val));
+        return 1;
+    // если введе только ключ- выводим сообщение об ошибке
+    }else{
+        printf("SmallSH: declare usage error. Type 'help' to get more info\n");
+        return 1;
+    }
 }
 int smallsh_help(char **args)
 {
@@ -662,6 +688,11 @@ int smallsh_help(char **args)
     printf("Angr\n");
     printf("Middle\n");
     printf("Hub\n");
+    printf("> declare\n");
+    printf("BASHVERSION=1.3.8\n");
+    printf("> declare PATH /home/usr/\n");
+    printf("BASHVERSION=1.3.8\n");
+    printf("PATH=/home/urs/\n");
 
     printf("> gnome-calculator \n");
     printf("^C # Press CTRL+C to interrupt program\n");

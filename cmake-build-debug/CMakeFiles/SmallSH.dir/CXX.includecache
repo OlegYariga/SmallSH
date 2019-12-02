@@ -21,14 +21,12 @@ sys/types.h
 -
 dirent.h
 -
-map
--
 string
--
-list
 -
 sys/stat.h
 -
 fcntl.h
+-
+map
 -
 
