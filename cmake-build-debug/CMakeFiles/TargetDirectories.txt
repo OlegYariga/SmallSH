@@ -1,3 +1,0 @@
-/home/user/Рабочий стол/SmallSH/cmake-build-debug/CMakeFiles/rebuild_cache.dir
-/home/user/Рабочий стол/SmallSH/cmake-build-debug/CMakeFiles/SmallSH.dir
-/home/user/Рабочий стол/SmallSH/cmake-build-debug/CMakeFiles/edit_cache.dir
